@@ -1,19 +1,12 @@
-use std::{
-    num::NonZeroUsize,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{num::NonZeroUsize, time::Duration};
 
 use libp2p::{
-    core::{muxing::StreamMuxerBox, transport::Boxed, upgrade, Endpoint},
+    core::{muxing::StreamMuxerBox, transport::Boxed, upgrade},
     futures::StreamExt,
     identify,
     identity::{self, PublicKey},
     noise,
-    swarm::{
-        ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, PollParameters, SwarmBuilder,
-        THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
-    },
+    swarm::{NetworkBehaviour, StreamUpgradeError, SwarmBuilder},
     tcp, Multiaddr, PeerId, Transport,
 };
 use tracing::{error, info};
@@ -91,6 +84,8 @@ fn build_transport(
         .boxed()
 }
 
+#[derive(NetworkBehaviour)]
+#[behaviour(to_swarm = "PeerInfoEvent")]
 struct PeerHandshakeBehaviour {
     /// Periodically identifies the remote and responds to incoming requests.
     identify: identify::Behaviour,
@@ -112,148 +107,35 @@ impl PeerHandshakeBehaviour {
 
 /// Event that can be emitted by the behaviour.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum PeerInfoEvent {
     /// We have obtained identity information from a peer, including the addresses it is listening
-    /// on.
+    /// on
     Identified {
-        /// Id of the peer that has been identified.
+        /// Id of the peer that has been identified
         peer_id: PeerId,
-        /// Information about the peer.
+        /// Information about the peer
         info: identify::Info,
     },
+    Error {
+        peer_id: PeerId,
+        error: StreamUpgradeError<identify::UpgradeError>,
+    },
+    Uninteresting,
 }
 
-impl NetworkBehaviour for PeerHandshakeBehaviour {
-    type ConnectionHandler = <identify::Behaviour as NetworkBehaviour>::ConnectionHandler;
-
-    type ToSwarm = PeerInfoEvent;
-
-    fn handle_pending_inbound_connection(
-        &mut self,
-        connection_id: ConnectionId,
-        local_addr: &Multiaddr,
-        remote_addr: &Multiaddr,
-    ) -> Result<(), ConnectionDenied> {
-        self.identify
-            .handle_pending_inbound_connection(connection_id, local_addr, remote_addr)
-    }
-
-    fn handle_pending_outbound_connection(
-        &mut self,
-        _connection_id: ConnectionId,
-        _maybe_peer: Option<PeerId>,
-        _addresses: &[Multiaddr],
-        _effective_role: Endpoint,
-    ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
-        // Only `Discovery::handle_pending_outbound_connection` must be returning addresses to
-        // ensure that we don't return unwanted addresses.
-        Ok(Vec::new())
-    }
-
-    fn handle_established_inbound_connection(
-        &mut self,
-        connection_id: ConnectionId,
-        peer: PeerId,
-        local_addr: &Multiaddr,
-        remote_addr: &Multiaddr,
-    ) -> Result<THandler<Self>, ConnectionDenied> {
-        let identify_handler = self.identify.handle_established_inbound_connection(
-            connection_id,
-            peer,
-            local_addr,
-            remote_addr,
-        )?;
-        Ok(identify_handler)
-    }
-
-    fn handle_established_outbound_connection(
-        &mut self,
-        connection_id: ConnectionId,
-        peer: PeerId,
-        addr: &Multiaddr,
-        role_override: Endpoint,
-    ) -> Result<THandler<Self>, ConnectionDenied> {
-        let identify_handler = self.identify.handle_established_outbound_connection(
-            connection_id,
-            peer,
-            addr,
-            role_override,
-        )?;
-        Ok(identify_handler)
-    }
-
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
-        self.identify.on_swarm_event(event);
-    }
-
-    fn on_connection_handler_event(
-        &mut self,
-        peer_id: PeerId,
-        connection_id: ConnectionId,
-        event: THandlerOutEvent<Self>,
-    ) {
-        self.identify
-            .on_connection_handler_event(peer_id, connection_id, event)
-    }
-
-    fn poll(
-        &mut self,
-        cx: &mut Context,
-        params: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
-        loop {
-            match self.identify.poll(cx, params) {
-                Poll::Pending => break,
-                Poll::Ready(ToSwarm::GenerateEvent(event)) => match event {
-                    identify::Event::Received { peer_id, info, .. } => {
-                        let event = PeerInfoEvent::Identified { peer_id, info };
-                        return Poll::Ready(ToSwarm::GenerateEvent(event));
-                    }
-                    identify::Event::Error { peer_id, error } => {
-                        error!(?peer_id, %error, "Identification with peer failed")
-                    }
-                    identify::Event::Pushed { .. } => {}
-                    identify::Event::Sent { .. } => {}
-                },
-                Poll::Ready(ToSwarm::Dial { opts }) => return Poll::Ready(ToSwarm::Dial { opts }),
-                Poll::Ready(ToSwarm::NotifyHandler {
-                    peer_id,
-                    handler,
-                    event,
-                }) => {
-                    return Poll::Ready(ToSwarm::NotifyHandler {
-                        peer_id,
-                        handler,
-                        event,
-                    })
-                }
-                Poll::Ready(ToSwarm::CloseConnection {
-                    peer_id,
-                    connection,
-                }) => {
-                    return Poll::Ready(ToSwarm::CloseConnection {
-                        peer_id,
-                        connection,
-                    })
-                }
-                Poll::Ready(ToSwarm::NewExternalAddrCandidate(observed)) => {
-                    return Poll::Ready(ToSwarm::NewExternalAddrCandidate(observed))
-                }
-                Poll::Ready(ToSwarm::ExternalAddrConfirmed(addr)) => {
-                    return Poll::Ready(ToSwarm::ExternalAddrConfirmed(addr))
-                }
-                Poll::Ready(ToSwarm::ExternalAddrExpired(addr)) => {
-                    return Poll::Ready(ToSwarm::ExternalAddrExpired(addr))
-                }
-                Poll::Ready(ToSwarm::ListenOn { opts }) => {
-                    return Poll::Ready(ToSwarm::ListenOn { opts })
-                }
-                Poll::Ready(ToSwarm::RemoveListener { id }) => {
-                    return Poll::Ready(ToSwarm::RemoveListener { id })
-                }
+impl From<identify::Event> for PeerInfoEvent {
+    fn from(event: identify::Event) -> Self {
+        match event {
+            identify::Event::Received { peer_id, info, .. } => {
+                PeerInfoEvent::Identified { peer_id, info }
             }
+            identify::Event::Error { peer_id, error } => {
+                error!(?peer_id, %error, "Identification with peer failed");
+                PeerInfoEvent::Error { peer_id, error }
+            }
+            identify::Event::Pushed { .. } => PeerInfoEvent::Uninteresting,
+            identify::Event::Sent { .. } => PeerInfoEvent::Uninteresting,
         }
-
-        Poll::Pending
     }
 }
