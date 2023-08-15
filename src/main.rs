@@ -11,9 +11,8 @@ use libp2p::{
     identity::{self, PublicKey},
     noise,
     swarm::{
-        ConnectionClosed, ConnectionDenied, ConnectionId, DialFailure, FromSwarm, ListenFailure,
-        NetworkBehaviour, PollParameters, SwarmBuilder, THandler, THandlerInEvent,
-        THandlerOutEvent, ToSwarm,
+        ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, PollParameters, SwarmBuilder,
+        THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
     },
     tcp, Multiaddr, PeerId, Transport,
 };
@@ -184,85 +183,7 @@ impl NetworkBehaviour for PeerHandshakeBehaviour {
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
-        match event {
-            FromSwarm::ConnectionEstablished(e) => {
-                self.identify
-                    .on_swarm_event(FromSwarm::ConnectionEstablished(e));
-            }
-            FromSwarm::ConnectionClosed(ConnectionClosed {
-                peer_id,
-                connection_id,
-                endpoint,
-                handler,
-                remaining_established,
-            }) => {
-                self.identify
-                    .on_swarm_event(FromSwarm::ConnectionClosed(ConnectionClosed {
-                        peer_id,
-                        connection_id,
-                        endpoint,
-                        handler,
-                        remaining_established,
-                    }));
-            }
-            FromSwarm::DialFailure(DialFailure {
-                peer_id,
-                error,
-                connection_id,
-            }) => {
-                self.identify
-                    .on_swarm_event(FromSwarm::DialFailure(DialFailure {
-                        peer_id,
-                        error,
-                        connection_id,
-                    }));
-            }
-            FromSwarm::ListenerClosed(e) => {
-                self.identify.on_swarm_event(FromSwarm::ListenerClosed(e));
-            }
-            FromSwarm::ListenFailure(ListenFailure {
-                local_addr,
-                send_back_addr,
-                error,
-                connection_id,
-            }) => {
-                self.identify
-                    .on_swarm_event(FromSwarm::ListenFailure(ListenFailure {
-                        local_addr,
-                        send_back_addr,
-                        error,
-                        connection_id,
-                    }));
-            }
-            FromSwarm::ListenerError(e) => {
-                self.identify.on_swarm_event(FromSwarm::ListenerError(e));
-            }
-            FromSwarm::ExternalAddrExpired(e) => {
-                self.identify
-                    .on_swarm_event(FromSwarm::ExternalAddrExpired(e));
-            }
-            FromSwarm::NewListener(e) => {
-                self.identify.on_swarm_event(FromSwarm::NewListener(e));
-            }
-            FromSwarm::ExpiredListenAddr(e) => {
-                self.identify
-                    .on_swarm_event(FromSwarm::ExpiredListenAddr(e));
-            }
-            FromSwarm::NewExternalAddrCandidate(e) => {
-                self.identify
-                    .on_swarm_event(FromSwarm::NewExternalAddrCandidate(e));
-            }
-            FromSwarm::ExternalAddrConfirmed(e) => {
-                self.identify
-                    .on_swarm_event(FromSwarm::ExternalAddrConfirmed(e));
-            }
-            FromSwarm::AddressChange(e) => {
-                self.identify.on_swarm_event(FromSwarm::AddressChange(e));
-            }
-            FromSwarm::NewListenAddr(e) => {
-                self.identify.on_swarm_event(FromSwarm::NewListenAddr(e));
-            }
-        }
+        self.identify.on_swarm_event(event);
     }
 
     fn on_connection_handler_event(
