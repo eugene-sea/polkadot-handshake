@@ -21,11 +21,14 @@
 //! This module provides a `Sink` and `Stream` for length-delimited
 //! Noise protocol messages in form of [`NoiseFramed`].
 
-use super::super::{protocol::PublicKey, Error};
-use super::Output;
-use futures::prelude::*;
-use futures::ready;
-use libp2p::bytes::{Bytes, BytesMut};
+use super::{
+    super::{protocol::PublicKey, Error},
+    Output,
+};
+use libp2p::{
+    bytes::{Bytes, BytesMut},
+    futures::{prelude::*, ready},
+};
 use std::{
     fmt, io,
     pin::Pin,
@@ -79,14 +82,6 @@ impl<T> NoiseFramed<T, snow::HandshakeState> {
             write_buffer: Vec::new(),
             decrypt_buffer: BytesMut::new(),
         }
-    }
-
-    pub fn is_initiator(&self) -> bool {
-        self.session.is_initiator()
-    }
-
-    pub fn is_responder(&self) -> bool {
-        !self.session.is_initiator()
     }
 
     /// Converts the `NoiseFramed` into a `NoiseOutput` encrypted data stream
@@ -166,7 +161,7 @@ impl WriteState {
     }
 }
 
-impl<T, S> futures::stream::Stream for NoiseFramed<T, S>
+impl<T, S> libp2p::futures::stream::Stream for NoiseFramed<T, S>
 where
     T: AsyncRead + Unpin,
     S: SessionState + Unpin,
@@ -265,7 +260,7 @@ where
     }
 }
 
-impl<T, S> futures::sink::Sink<&Vec<u8>> for NoiseFramed<T, S>
+impl<T, S> libp2p::futures::sink::Sink<&Vec<u8>> for NoiseFramed<T, S>
 where
     T: AsyncWrite + Unpin,
     S: SessionState + Unpin,

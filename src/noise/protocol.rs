@@ -39,12 +39,10 @@ pub static PARAMS_XX: Lazy<NoiseParams> = Lazy::new(|| {
 
 pub fn noise_params_into_builder<'b>(
     params: NoiseParams,
-    prologue: &'b [u8],
     private_key: &'b SecretKey,
     remote_public_key: Option<&'b PublicKey>,
 ) -> snow::Builder<'b> {
     let mut builder = snow::Builder::with_resolver(params, Box::new(Resolver))
-        .prologue(prologue.as_ref())
         .local_private_key(private_key.as_ref());
 
     if let Some(remote_public_key) = remote_public_key {
@@ -179,28 +177,14 @@ impl snow::resolvers::CryptoResolver for Resolver {
         &self,
         choice: &snow::params::HashChoice,
     ) -> Option<Box<dyn snow::types::Hash>> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            snow::resolvers::DefaultResolver.resolve_hash(choice)
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            snow::resolvers::RingResolver.resolve_hash(choice)
-        }
+        snow::resolvers::RingResolver.resolve_hash(choice)
     }
 
     fn resolve_cipher(
         &self,
         choice: &snow::params::CipherChoice,
     ) -> Option<Box<dyn snow::types::Cipher>> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            snow::resolvers::DefaultResolver.resolve_cipher(choice)
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            snow::resolvers::RingResolver.resolve_cipher(choice)
-        }
+        snow::resolvers::RingResolver.resolve_cipher(choice)
     }
 }
 
@@ -284,40 +268,4 @@ impl snow::types::Dh for Keypair {
         shared_secret[..32].copy_from_slice(&ss[..]);
         Ok(())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::protocol::PARAMS_XX;
-    use once_cell::sync::Lazy;
-
-    #[test]
-    fn handshake_hashes_disagree_if_prologue_differs() {
-        let alice = xx_builder(b"alice prologue").build_initiator().unwrap();
-        let bob = xx_builder(b"bob prologue").build_responder().unwrap();
-
-        let alice_handshake_hash = alice.get_handshake_hash();
-        let bob_handshake_hash = bob.get_handshake_hash();
-
-        assert_ne!(alice_handshake_hash, bob_handshake_hash)
-    }
-
-    #[test]
-    fn handshake_hashes_agree_if_prologue_is_the_same() {
-        let alice = xx_builder(b"shared knowledge").build_initiator().unwrap();
-        let bob = xx_builder(b"shared knowledge").build_responder().unwrap();
-
-        let alice_handshake_hash = alice.get_handshake_hash();
-        let bob_handshake_hash = bob.get_handshake_hash();
-
-        assert_eq!(alice_handshake_hash, bob_handshake_hash)
-    }
-
-    fn xx_builder(prologue: &'static [u8]) -> snow::Builder<'static> {
-        noise_params_into_builder(PARAMS_XX.clone(), prologue, TEST_KEY.secret(), None)
-    }
-
-    // Hack to work around borrow-checker.
-    static TEST_KEY: Lazy<Keypair> = Lazy::new(Keypair::new);
 }

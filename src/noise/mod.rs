@@ -18,61 +18,18 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-//! [Noise protocol framework][noise] support for libp2p.
-//!
-//! > **Note**: This crate is still experimental and subject to major breaking changes
-//! >           both on the API and the wire protocol.
-//!
-//! This crate provides `libp2p_core::InboundUpgrade` and `libp2p_core::OutboundUpgrade`
-//! implementations for various noise handshake patterns (currently `IK`, `IX`, and `XX`)
-//! over a particular choice of Diffie–Hellman key agreement (currently only X25519).
-//!
-//! > **Note**: Only the `XX` handshake pattern is currently guaranteed to provide
-//! >           interoperability with other libp2p implementations.
-//!
-//! All upgrades produce as output a pair, consisting of the remote's static public key
-//! and a `NoiseOutput` which represents the established cryptographic session with the
-//! remote, implementing `futures::io::AsyncRead` and `futures::io::AsyncWrite`.
-//!
-//! # Usage
-//!
-//! Example:
-//!
-//! ```
-//! use libp2p_core::{Transport, upgrade, transport::MemoryTransport};
-//! use libp2p_noise as noise;
-//! use libp2p_identity as identity;
-//!
-//! # fn main() {
-//! let id_keys = identity::Keypair::generate_ed25519();
-//! let noise = noise::Config::new(&id_keys).unwrap();
-//! let builder = MemoryTransport::default().upgrade(upgrade::Version::V1).authenticate(noise);
-//! // let transport = builder.multiplex(...);
-//! # }
-//! ```
-//!
-//! [noise]: http://noiseprotocol.org/
-
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![allow(deprecated)] // Temporarily until we remove deprecated items.
-
 mod io;
 mod protocol;
 
-pub use io::Output;
-
-use self::handshake::State;
-use self::io::handshake;
-use self::protocol::{noise_params_into_builder, AuthenticKeypair, Keypair, PARAMS_XX};
-use libp2p::core::{InboundUpgrade, OutboundUpgrade, UpgradeInfo};
-use libp2p::futures::prelude::*;
-use libp2p::identity;
-use libp2p::identity::PeerId;
-use libp2p::multiaddr::Protocol;
-use libp2p::multihash::Multihash;
+use handshake::State;
+use io::{handshake, Output};
+use libp2p::{
+    core::{InboundUpgrade, OutboundUpgrade, UpgradeInfo},
+    futures::prelude::*,
+    identity::{self, PeerId},
+};
+use protocol::{noise_params_into_builder, AuthenticKeypair, Keypair, PARAMS_XX};
 use snow::params::NoiseParams;
-use std::collections::HashSet;
-use std::fmt::Write;
 use std::pin::Pin;
 
 /// The configuration for the noise handshake.
@@ -80,15 +37,6 @@ use std::pin::Pin;
 pub struct Config {
     dh_keys: AuthenticKeypair,
     params: NoiseParams,
-    webtransport_certhashes: Option<HashSet<Multihash<64>>>,
-
-    /// Prologue to use in the noise handshake.
-    ///
-    /// The prologue can contain arbitrary data that will be hashed into the noise handshake.
-    /// For the handshake to succeed, both parties must set the same prologue.
-    ///
-    /// For further information, see <https://noiseprotocol.org/noise.html#prologue>.
-    prologue: Vec<u8>,
 }
 
 impl Config {
@@ -99,64 +47,23 @@ impl Config {
         Ok(Self {
             dh_keys: noise_keys,
             params: PARAMS_XX.clone(),
-            webtransport_certhashes: None,
-            prologue: vec![],
         })
     }
 
-    /// Set the noise prologue.
-    pub fn with_prologue(mut self, prologue: Vec<u8>) -> Self {
-        self.prologue = prologue;
-        self
-    }
-
-    /// Set WebTransport certhashes extension.
-    ///
-    /// In case of initiator, these certhashes will be used to validate the ones reported by
-    /// responder.
-    ///
-    /// In case of responder, these certhashes will be reported to initiator.
-    pub fn with_webtransport_certhashes(mut self, certhashes: HashSet<Multihash<64>>) -> Self {
-        self.webtransport_certhashes = Some(certhashes).filter(|h| !h.is_empty());
-        self
-    }
-
     fn into_responder<S>(self, socket: S) -> Result<State<S>, Error> {
-        let session = noise_params_into_builder(
-            self.params,
-            &self.prologue,
-            self.dh_keys.keypair.secret(),
-            None,
-        )
-        .build_responder()?;
+        let session = noise_params_into_builder(self.params, self.dh_keys.keypair.secret(), None)
+            .build_responder()?;
 
-        let state = State::new(
-            socket,
-            session,
-            self.dh_keys.identity,
-            None,
-            self.webtransport_certhashes,
-        );
+        let state = State::new(socket, session, self.dh_keys.identity, None);
 
         Ok(state)
     }
 
     fn into_initiator<S>(self, socket: S) -> Result<State<S>, Error> {
-        let session = noise_params_into_builder(
-            self.params,
-            &self.prologue,
-            self.dh_keys.keypair.secret(),
-            None,
-        )
-        .build_initiator()?;
+        let session = noise_params_into_builder(self.params, self.dh_keys.keypair.secret(), None)
+            .build_initiator()?;
 
-        let state = State::new(
-            socket,
-            session,
-            self.dh_keys.identity,
-            None,
-            self.webtransport_certhashes,
-        );
+        let state = State::new(socket, session, self.dh_keys.identity, None);
 
         Ok(state)
     }
@@ -231,8 +138,6 @@ pub enum Error {
     InvalidKey(#[from] libp2p::identity::DecodingError),
     #[error("Only keys of length 32 bytes are supported")]
     InvalidLength,
-    #[error("Remote authenticated with an unexpected public key")]
-    UnexpectedKey,
     #[error("The signature of the remote identity's public key does not verify")]
     BadSignature,
     #[error("Authentication failed")]
@@ -241,20 +146,8 @@ pub enum Error {
     InvalidPayload(#[from] DecodeError),
     #[error(transparent)]
     SigningError(#[from] libp2p::identity::SigningError),
-    #[error("Expected WebTransport certhashes ({}) are not a subset of received ones ({})", certhashes_to_string(.0), certhashes_to_string(.1))]
-    UnknownWebTransportCerthashes(HashSet<Multihash<64>>, HashSet<Multihash<64>>),
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 pub struct DecodeError(quick_protobuf::Error);
-
-fn certhashes_to_string(certhashes: &HashSet<Multihash<64>>) -> String {
-    let mut s = String::new();
-
-    for hash in certhashes {
-        write!(&mut s, "{}", Protocol::Certhash(*hash)).unwrap();
-    }
-
-    s
-}

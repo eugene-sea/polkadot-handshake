@@ -23,9 +23,10 @@
 mod framed;
 pub(super) mod handshake;
 use framed::{NoiseFramed, MAX_FRAME_LEN};
-use libp2p::bytes::Bytes;
-use libp2p::futures::prelude::*;
-use libp2p::futures::ready;
+use libp2p::{
+    bytes::Bytes,
+    futures::{prelude::*, ready},
+};
 use std::{
     cmp::min,
     fmt, io,
