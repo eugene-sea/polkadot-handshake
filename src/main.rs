@@ -5,12 +5,11 @@ use libp2p::{
     futures::StreamExt,
     identify,
     identity::{self, PublicKey},
+    noise,
     swarm::{NetworkBehaviour, StreamUpgradeError, SwarmBuilder},
     tcp, Multiaddr, PeerId, Transport,
 };
 use tracing::{error, info};
-
-mod noise;
 
 const YAMUX_MAXIMUM_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 const NODE_NAME: &str = "test-node";
